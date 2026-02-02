@@ -16,6 +16,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.Extensions.Logging;
 using ApplicationSecurityAssignment2.Services;
+using ApplicationSecurityAssignment2.Data;
+using Microsoft.AspNetCore.Http;
 
 
 
@@ -27,18 +29,21 @@ namespace ApplicationSecurityAssignment2.Areas.Identity.Pages.Account
         private readonly ILogger<LoginModel> _logger;
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly AuditLogService _audit;
+        private readonly ApplicationDbContext _db;
+
 
         public LoginModel(
             SignInManager<ApplicationUser> signInManager, 
             ILogger<LoginModel> logger,
             UserManager<ApplicationUser> userManager,
-            AuditLogService audit)
+            AuditLogService audit,
+            ApplicationDbContext db)
         {
             _signInManager = signInManager;
             _logger = logger;
             _userManager = userManager;
             _audit = audit;
-
+            _db = db;
         }
 
         /// <summary>
@@ -135,8 +140,41 @@ namespace ApplicationSecurityAssignment2.Areas.Identity.Pages.Account
             if (result.Succeeded)
             {
                 _logger.LogInformation("User logged in.");
+
+                var token = Guid.NewGuid().ToString("N"); // session token per login
+                HttpContext.Session.SetString("AuthToken", token);
+
+                // cookie copy(Auth token) to match session
+                Response.Cookies.Append("AuthToken", token, new CookieOptions
+                {
+                    HttpOnly = true,
+                    Secure = true,
+                    SameSite = SameSiteMode.Strict,
+                    Expires = DateTimeOffset.UtcNow.AddMinutes(5)
+                });
+
+                // store to DB for multi-login detection
+                if (user != null)
+                {
+                    // Revoke previous active sessions for this user (single-session policy)
+                    var previous = _db.ActiveSessions.Where(s => s.UserId == user.Id && !s.IsRevoked);
+                    foreach (var s in previous) s.IsRevoked = true;
+
+                    _db.ActiveSessions.Add(new ActiveSession
+                    {
+                        UserId = user.Id,
+                        SessionToken = token,
+                        IssuedAtUtc = DateTime.UtcNow,
+                        ExpiresAtUtc = DateTime.UtcNow.AddMinutes(5),
+                        IsRevoked = false
+                    });
+
+                    await _db.SaveChangesAsync();
+                }
+
                 await _audit.WriteAsync(HttpContext, "LOGIN_SUCCESS", user?.Id, Input.Email, "Login succeeded.");
                 return LocalRedirect(returnUrl);
+
             }
 
             if (result.IsLockedOut)
@@ -148,7 +186,6 @@ namespace ApplicationSecurityAssignment2.Areas.Identity.Pages.Account
 
             if (result.RequiresTwoFactor)
             {
-                // If you didn't scaffold 2FA pages, don't redirect there.
                 await _audit.WriteAsync(HttpContext, "LOGIN_2FA_REQUIRED", user?.Id, Input.Email, "2FA required but not implemented.");
                 ModelState.AddModelError(string.Empty, "Two-factor authentication is required for this account.");
                 return Page();
