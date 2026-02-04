@@ -27,5 +27,7 @@ namespace ApplicationSecurityAssignment2.Models
         // Encrypted CC + IV (Base64)
         public string? EncryptedCreditCard { get; set; }
         public string? CreditCardIV { get; set; }
+        public ICollection<PasswordHistory> PasswordHistories { get; set; } = new List<PasswordHistory>();
+
     }
 }

@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using ApplicationSecurityAssignment2.Models;
 using ApplicationSecurityAssignment2.Services;
+using Microsoft.AspNetCore.Identity.UI.Services;
+
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -27,7 +29,8 @@ builder.Services.AddDefaultIdentity<ApplicationUser>(options =>
     options.Lockout.MaxFailedAccessAttempts = 3;
     options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(1);
 })
-.AddEntityFrameworkStores<ApplicationDbContext>();
+.AddEntityFrameworkStores<ApplicationDbContext>()
+.AddDefaultTokenProviders();
 
 builder.Services.AddScoped<AuditLogService>();
 
@@ -43,6 +46,11 @@ builder.Services.AddSession(options =>
 });
 
 builder.Services.AddControllersWithViews();
+builder.Services.AddScoped<PasswordHistoryService>();
+builder.Services.AddHttpClient();
+builder.Services.AddScoped<RecaptchaService>();
+builder.Services.AddTransient<IEmailSender, SmtpEmailSender>();
+
 
 builder.Services.AddSingleton(sp =>
 {
@@ -60,11 +68,12 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
     app.UseMigrationsEndPoint();
+    app.UseStatusCodePagesWithReExecute("/Error/{0}");
 }
 else
 {
-    app.UseExceptionHandler("/Home/Error");
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
+    app.UseExceptionHandler("/Error");
+    app.UseStatusCodePagesWithReExecute("/Error/{0}");
     app.UseHsts();
 }
 

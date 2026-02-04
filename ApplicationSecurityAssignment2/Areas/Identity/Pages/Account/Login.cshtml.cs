@@ -1,4 +1,5 @@
-﻿// Licensed to the .NET Foundation under one or more agreements.
+﻿// Areas/Identity/Pages/Account/Login.cshtml.cs
+// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 #nullable disable
 
@@ -7,19 +8,16 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.Authorization;
+using ApplicationSecurityAssignment2.Data;
 using ApplicationSecurityAssignment2.Models;
+using ApplicationSecurityAssignment2.Services;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.Identity.UI.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using ApplicationSecurityAssignment2.Services;
-using ApplicationSecurityAssignment2.Data;
-using Microsoft.AspNetCore.Http;
-
-
 
 namespace ApplicationSecurityAssignment2.Areas.Identity.Pages.Account
 {
@@ -31,73 +29,56 @@ namespace ApplicationSecurityAssignment2.Areas.Identity.Pages.Account
         private readonly AuditLogService _audit;
         private readonly ApplicationDbContext _db;
 
+        private readonly RecaptchaService _recaptcha;
+        private readonly IConfiguration _config;
+
+        private readonly PasswordHistoryService _passwordHistory;
 
         public LoginModel(
-            SignInManager<ApplicationUser> signInManager, 
+            SignInManager<ApplicationUser> signInManager,
             ILogger<LoginModel> logger,
             UserManager<ApplicationUser> userManager,
             AuditLogService audit,
-            ApplicationDbContext db)
+            ApplicationDbContext db,
+            RecaptchaService recaptcha,
+            IConfiguration config,
+            PasswordHistoryService passwordHistory)
         {
             _signInManager = signInManager;
             _logger = logger;
             _userManager = userManager;
             _audit = audit;
             _db = db;
+
+            _recaptcha = recaptcha;
+            _config = config;
+
+            _passwordHistory = passwordHistory;
         }
 
-        /// <summary>
-        ///     This API supports the ASP.NET Core Identity default UI infrastructure and is not intended to be used
-        ///     directly from your code. This API may change or be removed in future releases.
-        /// </summary>
         [BindProperty]
         public InputModel Input { get; set; }
 
-        /// <summary>
-        ///     This API supports the ASP.NET Core Identity default UI infrastructure and is not intended to be used
-        ///     directly from your code. This API may change or be removed in future releases.
-        /// </summary>
-        public IList<AuthenticationScheme> ExternalLogins { get; set; }
+        // token posted from the hidden input in Login.cshtml
+        [BindProperty]
+        public string RecaptchaToken { get; set; }
 
-        /// <summary>
-        ///     This API supports the ASP.NET Core Identity default UI infrastructure and is not intended to be used
-        ///     directly from your code. This API may change or be removed in future releases.
-        /// </summary>
+        public IList<AuthenticationScheme> ExternalLogins { get; set; }
         public string ReturnUrl { get; set; }
 
-        /// <summary>
-        ///     This API supports the ASP.NET Core Identity default UI infrastructure and is not intended to be used
-        ///     directly from your code. This API may change or be removed in future releases.
-        /// </summary>
         [TempData]
         public string ErrorMessage { get; set; }
 
-        /// <summary>
-        ///     This API supports the ASP.NET Core Identity default UI infrastructure and is not intended to be used
-        ///     directly from your code. This API may change or be removed in future releases.
-        /// </summary>
         public class InputModel
         {
-            /// <summary>
-            ///     This API supports the ASP.NET Core Identity default UI infrastructure and is not intended to be used
-            ///     directly from your code. This API may change or be removed in future releases.
-            /// </summary>
             [Required]
             [EmailAddress]
             public string Email { get; set; }
 
-            /// <summary>
-            ///     This API supports the ASP.NET Core Identity default UI infrastructure and is not intended to be used
-            ///     directly from your code. This API may change or be removed in future releases.
-            /// </summary>
             [Required]
             [DataType(DataType.Password)]
             public string Password { get; set; }
 
-            /// <summary>
-            ///     This API supports the ASP.NET Core Identity default UI infrastructure and is not intended to be used
-            ///     directly from your code. This API may change or be removed in future releases.
-            /// </summary>
             [Display(Name = "Remember me?")]
             public bool RememberMe { get; set; }
         }
@@ -105,18 +86,33 @@ namespace ApplicationSecurityAssignment2.Areas.Identity.Pages.Account
         public async Task OnGetAsync(string returnUrl = null)
         {
             if (!string.IsNullOrEmpty(ErrorMessage))
-            {
                 ModelState.AddModelError(string.Empty, ErrorMessage);
-            }
 
             returnUrl ??= Url.Content("~/");
 
-            // Clear the existing external cookie to ensure a clean login process
             await HttpContext.SignOutAsync(IdentityConstants.ExternalScheme);
 
             ExternalLogins = (await _signInManager.GetExternalAuthenticationSchemesAsync()).ToList();
-
             ReturnUrl = returnUrl;
+        }
+
+        private async Task<IActionResult> EnforceMaxPasswordAgeOrNullAsync(ApplicationUser user)
+        {
+            var maxAgeDays = _config.GetValue<int>("PasswordPolicy:MaxAgeDays");
+            if (maxAgeDays <= 0) return null;
+
+            var lastChanged = await _passwordHistory.GetLastChangedUtcAsync(user.Id);
+            if (lastChanged.HasValue &&
+                DateTime.UtcNow - lastChanged.Value > TimeSpan.FromDays(maxAgeDays))
+            {
+                await _audit.WriteAsync(HttpContext, "LOGIN_PASSWORD_EXPIRED", user.Id, user.Email,
+                    $"Password expired (older than {maxAgeDays} days). Forced reset.");
+
+                TempData["ErrorMessage"] = "Your password has expired. Please reset your password.";
+                return RedirectToPage("./ForgotPassword");
+            }
+
+            return null;
         }
 
         public async Task<IActionResult> OnPostAsync(string returnUrl = null)
@@ -127,10 +123,29 @@ namespace ApplicationSecurityAssignment2.Areas.Identity.Pages.Account
             if (!ModelState.IsValid)
                 return Page();
 
-            // Find user early for logging (may be null)
+            // reCAPTCHA v3 (server-side)
+           
+            var minScore = 0.5;
+            var minScoreStr = _config["Recaptcha:MinimumScore"];
+            if (!string.IsNullOrWhiteSpace(minScoreStr) && double.TryParse(minScoreStr, out var ms))
+                minScore = ms;
+
+            var remoteIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+            var (ok, score, errors) = await _recaptcha.VerifyAsync(RecaptchaToken, "login", remoteIp);
+
+            if (!ok || score < minScore)
+            {
+                _logger.LogWarning("reCAPTCHA failed (login). ok={Ok}, score={Score}, errors={Errors}",
+                    ok, score, string.Join(",", errors ?? Array.Empty<string>()));
+
+                await _audit.WriteAsync(HttpContext, "LOGIN_RECAPTCHA_FAIL", null, Input.Email, "reCAPTCHA failed.");
+                ModelState.AddModelError(string.Empty, "reCAPTCHA verification failed. Please try again.");
+                return Page();
+            }
+
+            // Find user early for logging and checks (may be null)
             var user = await _userManager.FindByEmailAsync(Input.Email);
 
-            // IMPORTANT: lockoutOnFailure must be true to enforce lockout after failures
             var result = await _signInManager.PasswordSignInAsync(
                 Input.Email,
                 Input.Password,
@@ -139,12 +154,21 @@ namespace ApplicationSecurityAssignment2.Areas.Identity.Pages.Account
 
             if (result.Succeeded)
             {
+                if (user != null)
+                {
+                    var expiredResult = await EnforceMaxPasswordAgeOrNullAsync(user);
+                    if (expiredResult != null)
+                    {
+                        await _signInManager.SignOutAsync();
+                        return expiredResult;
+                    }
+                }
+
                 _logger.LogInformation("User logged in.");
 
-                var token = Guid.NewGuid().ToString("N"); // session token per login
+                var token = Guid.NewGuid().ToString("N");
                 HttpContext.Session.SetString("AuthToken", token);
 
-                // cookie copy(Auth token) to match session
                 Response.Cookies.Append("AuthToken", token, new CookieOptions
                 {
                     HttpOnly = true,
@@ -153,10 +177,8 @@ namespace ApplicationSecurityAssignment2.Areas.Identity.Pages.Account
                     Expires = DateTimeOffset.UtcNow.AddMinutes(5)
                 });
 
-                // store to DB for multi-login detection
                 if (user != null)
                 {
-                    // Revoke previous active sessions for this user (single-session policy)
                     var previous = _db.ActiveSessions.Where(s => s.UserId == user.Id && !s.IsRevoked);
                     foreach (var s in previous) s.IsRevoked = true;
 
@@ -174,7 +196,19 @@ namespace ApplicationSecurityAssignment2.Areas.Identity.Pages.Account
 
                 await _audit.WriteAsync(HttpContext, "LOGIN_SUCCESS", user?.Id, Input.Email, "Login succeeded.");
                 return LocalRedirect(returnUrl);
+            }
 
+            if (result.RequiresTwoFactor)
+            {
+                if (user != null)
+                {
+                    var expiredResult = await EnforceMaxPasswordAgeOrNullAsync(user);
+                    if (expiredResult != null)
+                        return expiredResult;
+                }
+
+                await _audit.WriteAsync(HttpContext, "LOGIN_2FA_REQUIRED", user?.Id, Input.Email, "2FA required.");
+                return RedirectToPage("./LoginWith2fa", new { ReturnUrl = returnUrl, RememberMe = Input.RememberMe });
             }
 
             if (result.IsLockedOut)
@@ -184,18 +218,10 @@ namespace ApplicationSecurityAssignment2.Areas.Identity.Pages.Account
                 return RedirectToPage("./Lockout");
             }
 
-            if (result.RequiresTwoFactor)
-            {
-                await _audit.WriteAsync(HttpContext, "LOGIN_2FA_REQUIRED", user?.Id, Input.Email, "2FA required but not implemented.");
-                ModelState.AddModelError(string.Empty, "Two-factor authentication is required for this account.");
-                return Page();
-            }
-
             _logger.LogWarning("Invalid login attempt.");
             await _audit.WriteAsync(HttpContext, "LOGIN_FAIL", user?.Id, Input.Email, "Invalid credentials.");
             ModelState.AddModelError(string.Empty, "Invalid login attempt.");
             return Page();
         }
-
     }
 }
