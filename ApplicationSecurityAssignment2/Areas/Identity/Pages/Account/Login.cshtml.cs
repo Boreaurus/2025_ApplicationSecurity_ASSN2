@@ -174,7 +174,7 @@ namespace ApplicationSecurityAssignment2.Areas.Identity.Pages.Account
                     HttpOnly = true,
                     Secure = true,
                     SameSite = SameSiteMode.Strict,
-                    Expires = DateTimeOffset.UtcNow.AddMinutes(5)
+                    Expires = DateTimeOffset.UtcNow.AddMinutes(1)
                 });
 
                 if (user != null)
@@ -187,7 +187,7 @@ namespace ApplicationSecurityAssignment2.Areas.Identity.Pages.Account
                         UserId = user.Id,
                         SessionToken = token,
                         IssuedAtUtc = DateTime.UtcNow,
-                        ExpiresAtUtc = DateTime.UtcNow.AddMinutes(5),
+                        ExpiresAtUtc = DateTime.UtcNow.AddMinutes(1),
                         IsRevoked = false
                     });
 

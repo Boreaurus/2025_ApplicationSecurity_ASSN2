@@ -1,9 +1,11 @@
-using System.Diagnostics;
 using ApplicationSecurityAssignment2.Models;
 using ApplicationSecurityAssignment2.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.CodeAnalysis.FlowAnalysis.DataFlow;
+using Microsoft.Data.SqlClient;
+using System.Diagnostics;
 
 namespace ApplicationSecurityAssignment2.Controllers
 {
@@ -55,7 +57,7 @@ namespace ApplicationSecurityAssignment2.Controllers
         [AllowAnonymous]
         public IActionResult Privacy()
         {
-            return View();
+            throw new Exception("Simulated error from Privacy");
         }
 
         [AllowAnonymous]

@@ -84,20 +84,18 @@ namespace ApplicationSecurityAssignment2.Areas.Identity.Pages.Account.Manage
             if (user == null)
                 return NotFound($"Unable to load user with ID '{_userManager.GetUserId(User)}'.");
 
-            // void password reuse (last 2)
-            var isReuse = await _passwordHistory.IsInRecentHistoryAsync(user, Input.NewPassword, lastN: 2);
-            if (isReuse)
+            // Defensive: new password should not equal current password
+            if (string.Equals(Input.OldPassword, Input.NewPassword, StringComparison.Ordinal))
             {
-                ModelState.AddModelError(string.Empty, "You cannot reuse your last 2 passwords.");
+                ModelState.AddModelError(string.Empty, "New password cannot be the same as the current password.");
                 return Page();
             }
 
-            // Minimum password age (optional: if config is missing, defaults to 0 = no restriction)
+            // Minimum password age (optional; config missing/0 disables)
             var minAgeMinutes = _config.GetValue<int>("PasswordPolicy:MinAgeMinutes");
             if (minAgeMinutes > 0)
             {
                 var lastChanged = await _passwordHistory.GetLastChangedUtcAsync(user.Id);
-
                 if (lastChanged.HasValue &&
                     DateTime.UtcNow - lastChanged.Value < TimeSpan.FromMinutes(minAgeMinutes))
                 {
@@ -107,7 +105,15 @@ namespace ApplicationSecurityAssignment2.Areas.Identity.Pages.Account.Manage
                 }
             }
 
-            // Perform change (Identity verifies old password)
+            // Avoid password reuse (last 2)
+            var isReuse = await _passwordHistory.IsInRecentHistoryAsync(user, Input.NewPassword, lastN: 2);
+            if (isReuse)
+            {
+                ModelState.AddModelError(string.Empty, "You cannot reuse your last 2 passwords.");
+                return Page();
+            }
+
+            // Perform change (Identity verifies old password + validates new password policy)
             var result = await _userManager.ChangePasswordAsync(user, Input.OldPassword, Input.NewPassword);
             if (!result.Succeeded)
             {
@@ -117,11 +123,12 @@ namespace ApplicationSecurityAssignment2.Areas.Identity.Pages.Account.Manage
                 return Page();
             }
 
-            // Record the new password hash + keep only last 2 (centralized)
-            user = await _userManager.GetUserAsync(User); // refresh so PasswordHash is current
+            // Refresh user so PasswordHash is current, then record in history (and trim to last 2 inside service)
+            user = await _userManager.GetUserAsync(User);
             await _passwordHistory.RecordAsync(user);
 
             await _signInManager.RefreshSignInAsync(user);
+
             _logger.LogInformation("User changed their password successfully.");
             StatusMessage = "Your password has been changed.";
 

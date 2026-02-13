@@ -5,12 +5,13 @@ using ApplicationSecurityAssignment2.Models;
 using ApplicationSecurityAssignment2.Services;
 using Microsoft.AspNetCore.Identity.UI.Services;
 
-
+//services
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
+
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(connectionString));
 
@@ -25,6 +26,7 @@ builder.Services.AddDefaultIdentity<ApplicationUser>(options =>
     options.Password.RequireDigit = true;
     options.Password.RequireLowercase = true;
     options.Password.RequireUppercase = true;
+
     options.Lockout.AllowedForNewUsers = true;
     options.Lockout.MaxFailedAccessAttempts = 3;
     options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(1);
@@ -33,24 +35,11 @@ builder.Services.AddDefaultIdentity<ApplicationUser>(options =>
 .AddDefaultTokenProviders();
 
 builder.Services.AddScoped<AuditLogService>();
-
-builder.Services.AddDistributedMemoryCache();
-
-builder.Services.AddSession(options =>
-{
-    options.IdleTimeout = TimeSpan.FromMinutes(5);  // session timeout requirement
-    options.Cookie.HttpOnly = true;
-    options.Cookie.IsEssential = true;
-    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
-    options.Cookie.SameSite = SameSiteMode.Strict;
-});
-
-builder.Services.AddControllersWithViews();
 builder.Services.AddScoped<PasswordHistoryService>();
-builder.Services.AddHttpClient();
 builder.Services.AddScoped<RecaptchaService>();
 builder.Services.AddTransient<IEmailSender, SmtpEmailSender>();
 
+builder.Services.AddHttpClient();
 
 builder.Services.AddSingleton(sp =>
 {
@@ -61,26 +50,42 @@ builder.Services.AddSingleton(sp =>
     return new AesEncryptionService(key);
 });
 
+builder.Services.AddDistributedMemoryCache();
+
+builder.Services.AddSession(options =>
+{
+    options.IdleTimeout = TimeSpan.FromMinutes(1);
+    options.Cookie.HttpOnly = true;
+    options.Cookie.IsEssential = true;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.Cookie.SameSite = SameSiteMode.Strict;
+});
+
+builder.Services.AddControllersWithViews();
+
+// app
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+
+app.UseExceptionHandler("/Error");
+app.UseStatusCodePagesWithReExecute("/Error/{0}");
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+}
+
 if (app.Environment.IsDevelopment())
 {
     app.UseMigrationsEndPoint();
-    app.UseStatusCodePagesWithReExecute("/Error/{0}");
-}
-else
-{
-    app.UseExceptionHandler("/Error");
-    app.UseStatusCodePagesWithReExecute("/Error/{0}");
-    app.UseHsts();
 }
 
 app.UseHttpsRedirection();
 app.UseStaticFiles();
 
 app.UseRouting();
+
 app.UseSession();
 
 app.UseAuthentication();
@@ -90,6 +95,7 @@ app.UseAuthorization();
 app.MapControllerRoute(
     name: "default",
     pattern: "{controller=Home}/{action=Index}/{id?}");
-app.MapRazorPages();     // Identity UI lives here
+
+app.MapRazorPages(); // Identity UI
 
 app.Run();

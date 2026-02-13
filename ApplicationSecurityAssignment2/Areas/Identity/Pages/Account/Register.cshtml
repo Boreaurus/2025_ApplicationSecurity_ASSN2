@@ -57,11 +57,32 @@
                 <span asp-validation-for="Input.ShippingAddress" class="text-danger"></span>
             </div>
 
-            <div class="form-floating mb-3">
-                <input asp-for="Input.Password" class="form-control" autocomplete="new-password" aria-required="true" placeholder="password" />
+            <div class="form-floating mb-1">
+                <input asp-for="Input.Password"
+                       id="RegisterPasswordInput"
+                       class="form-control"
+                       autocomplete="new-password"
+                       aria-required="true"
+                       placeholder="password" />
                 <label asp-for="Input.Password">Password</label>
                 <span asp-validation-for="Input.Password" class="text-danger"></span>
             </div>
+
+            <div class="mb-3">
+                <small>
+                    Strength:
+                    <span id="RegisterPasswordStrengthText" class="fw-bold">—</span>
+                </small>
+
+                <ul class="small mb-0">
+                    <li id="reg-rule-length">At least 12 characters</li>
+                    <li id="reg-rule-lower">Contains lowercase letter</li>
+                    <li id="reg-rule-upper">Contains uppercase letter</li>
+                    <li id="reg-rule-digit">Contains number</li>
+                    <li id="reg-rule-special">Contains special character</li>
+                </ul>
+            </div>
+
 
             <div class="form-floating mb-3">
                 <input asp-for="Input.ConfirmPassword" class="form-control" autocomplete="new-password" aria-required="true" placeholder="password" />
@@ -127,5 +148,65 @@
                     document.getElementById('RecaptchaToken').value = token;
                 });
         });
+    </script>
+
+    <script>
+        (function () {
+
+            const input = document.getElementById("RegisterPasswordInput");
+            const strengthText = document.getElementById("RegisterPasswordStrengthText");
+
+            function setRule(id, ok) {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.style.opacity = ok ? "1" : "0.4";
+                el.style.fontWeight = ok ? "600" : "400";
+            }
+
+            function evaluatePassword(pw) {
+
+                const checks = {
+                    length: pw.length >= 12,
+                    lower: /[a-z]/.test(pw),
+                    upper: /[A-Z]/.test(pw),
+                    digit: /\d/.test(pw),
+                    special: /[^A-Za-z0-9]/.test(pw)
+                };
+
+                const score = Object.values(checks).filter(Boolean).length;
+
+                setRule("reg-rule-length", checks.length);
+                setRule("reg-rule-lower", checks.lower);
+                setRule("reg-rule-upper", checks.upper);
+                setRule("reg-rule-digit", checks.digit);
+                setRule("reg-rule-special", checks.special);
+
+                if (!pw) {
+                    strengthText.textContent = "—";
+                    strengthText.className = "fw-bold";
+                    return;
+                }
+
+                if (score <= 2) {
+                    strengthText.textContent = "Weak";
+                    strengthText.className = "fw-bold text-danger";
+                }
+                else if (score <= 4) {
+                    strengthText.textContent = "Medium";
+                    strengthText.className = "fw-bold text-warning";
+                }
+                else {
+                    strengthText.textContent = "Strong";
+                    strengthText.className = "fw-bold text-success";
+                }
+            }
+
+            if (input) {
+                input.addEventListener("input", function () {
+                    evaluatePassword(input.value);
+                });
+            }
+
+        })();
     </script>
 }

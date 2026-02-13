@@ -69,9 +69,18 @@ namespace ApplicationSecurityAssignment2.Middleware
             if (path.StartsWith("/Error", StringComparison.OrdinalIgnoreCase))
                 return true;
 
-            // Identity pages (login/register/logout/forgot/reset/etc.)
-            if (path.StartsWith("/Identity", StringComparison.OrdinalIgnoreCase))
+         
+            // Allow only specific Identity endpoints without enforcement
+            if (path.StartsWith("/Identity/Account/Login", StringComparison.OrdinalIgnoreCase) ||
+                path.StartsWith("/Identity/Account/Register", StringComparison.OrdinalIgnoreCase) ||
+                path.StartsWith("/Identity/Account/ForgotPassword", StringComparison.OrdinalIgnoreCase) ||
+                path.StartsWith("/Identity/Account/ResetPassword", StringComparison.OrdinalIgnoreCase) ||
+                path.StartsWith("/Identity/Account/ConfirmEmail", StringComparison.OrdinalIgnoreCase) ||
+                path.StartsWith("/Identity/Account/Logout", StringComparison.OrdinalIgnoreCase))
+            {
                 return true;
+            }
+
 
             // Static files + uploads
             if (path.StartsWith("/css", StringComparison.OrdinalIgnoreCase) ||
